@@ -1,14 +1,21 @@
-# YARA Decision Agent
-
-A sophisticated decision-making system that employs research-driven metrics to evaluate and rank options based on innovation potential, implementation feasibility, and resource constraints.
+# YARA: Multi-Agent Research Framework
 
 ## Overview
+YARA (Yet Another Research Assistant) is a sophisticated multi-agent framework designed for academic research tasks. It implements a modular architecture with advanced task orchestration, focusing on research-driven decision making and automated analysis.
 
-The YARA Decision Agent implements an intelligent decision-making algorithm that:
-- Evaluates options using multiple weighted criteria
-- Considers both quantitative and qualitative factors
-- Provides research-backed reasoning for recommendations
-- Handles complex constraints and preferences
+## Core Components
+
+### 1. Multi-Agent Architecture
+- **Orchestrator**: Coordinates agent interactions and task flow
+- **Decision Agent**: Research-focused option evaluation
+- **Summarization Agent**: Advanced text analysis and synthesis
+- **Memory Handler**: Context management and persistence
+
+### 2. Research Features
+- Multi-criteria decision analysis
+- Automated research summarization
+- Weighted evaluation metrics
+- Innovation assessment scoring
 
 ## Key Features
 
