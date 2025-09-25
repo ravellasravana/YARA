@@ -127,9 +127,5 @@ This decision agent is particularly suited for:
 ## Author
 
 Your Name
-- LinkedIn: [Your LinkedIn Profile]
-- Email: [Your Email]
-
-## License
-
-MIT License
+- LinkedIn: www.linkedin.com/in/sravanaravella
+- Email: jyothisravana2005@gmail.com
