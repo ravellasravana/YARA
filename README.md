@@ -134,11 +134,20 @@ This decision agent is particularly suited for:
 ## Research Demo Tasks
 
 Task 001: Research Text Summarization
+
 <img width="1298" height="343" alt="image" src="https://github.com/user-attachments/assets/b156916b-d07d-49fc-a436-a789e0cd2618" />
+
+Task 002: Research Decision Making
+
+<img width="967" height="363" alt="image" src="https://github.com/user-attachments/assets/17047608-8d0a-40e9-8eac-9b822904678e" />
+
+Task 003: Combined Research Analysis
+
+<img width="968" height="524" alt="image" src="https://github.com/user-attachments/assets/9ae6ec0d-c803-4f6a-a3d0-d63a7566fe4f" />
 
 
 ## Author
 
-Your Name
+Jyothi Sai Sravana Ravella
 - LinkedIn: www.linkedin.com/in/sravanaravella
 - Email: jyothisravana2005@gmail.com
