@@ -131,6 +131,12 @@ This decision agent is particularly suited for:
 - Resource allocation optimization
 - Feature selection analysis
 
+## Research Demo Tasks
+
+Task 001: Research Text Summarization
+<img width="1298" height="343" alt="image" src="https://github.com/user-attachments/assets/b156916b-d07d-49fc-a436-a789e0cd2618" />
+
+
 ## Author
 
 Your Name
