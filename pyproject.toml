@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yara-research"
+version = "0.1.0"
+description = "Research decision and analysis agents"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Jyothi Sai Sravana Ravella" }]
+keywords = ["rag", "multi-agent", "retrieval", "llm", "research"]
+classifiers = [
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+]
+dependencies = [
+    "numpy>=1.24.0",
+    "scikit-learn>=1.2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4.0", "pytest-cov>=4.1.0", "ruff>=0.3.0"]
+
+[project.urls]
+Repository = "https://github.com/ravellasravana/YARA"
+
+[tool.setuptools.packages.find]
+include = ["yara*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# Errors, pyflakes, import order, bugbear. Not SIM/UP - they mostly argue
+# about style and the arguments are not worth having.
+select = ["E", "F", "I", "B"]
+ignore = ["E501"]
+
+[tool.coverage.run]
+source = ["yara"]
+omit = ["yara/cli.py", "*/__init__.py"]

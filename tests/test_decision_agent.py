@@ -1,5 +1,7 @@
 import unittest
+
 from yara.agents.decision_agent import DecisionAgent
+
 
 class TestDecisionAgent(unittest.TestCase):
     def setUp(self):
@@ -55,13 +57,13 @@ class TestDecisionAgent(unittest.TestCase):
         print("\n1.1 Available Options Analysis:")
         for opt in self.test_task["data"]:
             print(f"\nOption: {opt['name']}")
-            print(f"├── Innovation Metrics:")
+            print("├── Innovation Metrics:")
             print(f"│   ├── Novelty Score: {opt['novelty']:.2f}")
             print(f"│   └── Research Impact: {opt['research_impact']}/100")
-            print(f"├── Implementation Characteristics:")
+            print("├── Implementation Characteristics:")
             print(f"│   ├── Complexity Level: {opt['implementation_complexity']}")
             print(f"│   └── Feature Set: {', '.join(opt['features'])}")
-            print(f"└── Resource Requirements:")
+            print("└── Resource Requirements:")
             print(f"    └── Cost: ${opt['price']}")
 
         print("\n1.2 Decision Constraints:")

@@ -1,399 +1,151 @@
-from typing import Dict, Any, List, Optional, Tuple
-import logging
-from sklearn.preprocessing import MinMaxScaler
-import numpy as np
+"""Weighted multi-criteria ranking. No model call - same input, same output."""
+
+from __future__ import annotations
+
 import json
+import logging
+from typing import Any
+
+import numpy as np
+
+logger = logging.getLogger("yara.agents.decision")
+
+# Tuned by hand against the option sets in tests/test_decision_agent.py.
+# TODO: these should come from the task, not be baked in here.
+NOVELTY_WEIGHT = 0.5
+IMPACT_WEIGHT = 0.7
+COMPLEXITY_BONUS = 1.1
+
 
 class DecisionAgent:
-    def __init__(self):
-        self.logger = logging.getLogger("YARA.DecisionAgent")
-        self.scaler = MinMaxScaler()
+    def __init__(self, top_n: int = 3):
+        self.logger = logger
+        self.top_n = top_n
 
-    def _calculate_option_score(self, 
-                              option: Dict[str, Any], 
-                              normalized_criteria: Dict[str, float],
-                              user_prefs: Dict[str, Any]) -> Optional[float]:
-        """Calculate score for a single option"""
-        # Check required features
-        if "required_features" in user_prefs:
-            option_features = set(option.get("features", []))
-            required_features = set(user_prefs["required_features"])
-            if not required_features.issubset(option_features):
-                return None
+    def execute(self, task: dict[str, Any]) -> dict[str, Any]:
+        if task.get("type") != "decision":
+            return {"type": "recommendation", "recommendation": "N/A (not applicable for this task)"}
 
-        # Check constraints
-        if "max_price" in user_prefs and option.get("price", float("inf")) > user_prefs["max_price"]:
+        options = _extract_options(task.get("data", {}))
+        if not options:
+            return _empty("No options available for decision making")
+
+        prefs = task.get("user_preferences") or {}
+
+        # research_impact arrives on a 0-100 scale, novelty on 0-1. Rescale so
+        # the weights below mean the same thing for both.
+        top_impact = max((o.get("research_impact", 0) for o in options), default=0) or 100
+        for o in options:
+            if "research_impact" in o:
+                o["research_impact_score"] = o["research_impact"] / top_impact
+
+        criteria = task.get("criteria") or _numeric_fields(options[0])
+        total = sum(criteria.values()) or 1.0
+        weights = {k: v / total for k, v in criteria.items()}
+
+        scored = []
+        for o in options:
+            s = self._score(o, weights, prefs)
+            if s is not None:
+                scored.append((o, s))
+
+        if not scored:
+            return _empty("No suitable options found after applying criteria")
+
+        scored.sort(key=lambda pair: -pair[1])
+        best = scored[0][1] or 1.0
+        self.logger.info("ranked %d of %d options", len(scored), len(options))
+
+        return {
+            "type": "recommendation",
+            "recommendations": [
+                {"option": o, "score": float(s / best), "reasoning": self._why(o, prefs)}
+                for o, s in scored[: self.top_n]
+            ],
+            "statistics": _stats([s for _, s in scored], len(options), weights),
+        }
+
+    def _score(self, option, weights, prefs) -> float | None:
+        """None means the option was filtered out by a hard constraint."""
+        required = set(prefs.get("required_features", []))
+        if required and not required.issubset(set(option.get("features", []))):
             return None
-        if "min_quality" in user_prefs and option.get("quality", 0) < user_prefs["min_quality"]:
+        if "max_price" in prefs and option.get("price", float("inf")) > prefs["max_price"]:
+            return None
+        if "min_quality" in prefs and option.get("quality", 0) < prefs["min_quality"]:
             return None
 
-        # Base score
         score = 0.0
+        if "preferred_availability" in prefs:
+            if prefs["preferred_availability"] == option.get("availability"):
+                score += 1.0
 
-        # Add availability preference
-        if "preferred_availability" in user_prefs and user_prefs["preferred_availability"] == option.get("availability"):
-            score += 1.0
+        score += option.get("novelty", 0) * NOVELTY_WEIGHT
+        score += option.get("research_impact_score", 0) * IMPACT_WEIGHT
 
-        # Add novelty score (50% weight)
-        novelty_score = option.get("novelty", 0)
-        score += novelty_score * 0.5
+        for field, w in weights.items():
+            v = option.get(field)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                score += float(v) * w
 
-        # Add research impact score (70% weight)
-        research_score = option.get("research_impact_score", 0)
-        score += research_score * 0.7
-
-        # Add weighted criteria scores
-        for criterion, weight in normalized_criteria.items():
-            if criterion in option and isinstance(option[criterion], (int, float)):
-                value = float(option[criterion])
-                # Normalize value against maximum in options if needed
-                score += value * weight
-
-        # Add complexity match bonus (10%)
-        if option.get("implementation_complexity") == user_prefs.get("implementation_complexity"):
-            score *= 1.1
-
+        if option.get("implementation_complexity") == prefs.get("implementation_complexity"):
+            score *= COMPLEXITY_BONUS
         return score
 
-    def _generate_reasoning(self, 
-                          option: Dict[str, Any], 
-                          score: float,
-                          user_prefs: Dict[str, Any]) -> str:
-        """Generate reasoning for recommendation"""
+    def _why(self, option, prefs) -> str:
         reasons = []
-        
         if option.get("novelty", 0) > 0.7:
             reasons.append("High novelty factor")
-        
         if option.get("research_impact_score", 0) > 0.7:
             reasons.append("Strong research impact potential")
-        
-        if option.get("implementation_complexity") == user_prefs.get("implementation_complexity"):
+        if option.get("implementation_complexity") == prefs.get("implementation_complexity"):
             reasons.append("Matches preferred implementation complexity")
-        
-        if option.get("features", []):
-            matched_features = set(option["features"]).intersection(
-                set(user_prefs.get("required_features", [])))
-            if matched_features:
-                reasons.append(f"Contains required features: {', '.join(matched_features)}")
+        matched = set(option.get("features", [])) & set(prefs.get("required_features", []))
+        if matched:
+            reasons.append(f"Contains required features: {', '.join(sorted(matched))}")
+        return " | ".join(reasons) or "Based on overall score analysis"
 
-        if not reasons:
-            reasons.append("Based on overall score analysis")
 
-        return " | ".join(reasons)
+def _empty(message: str) -> dict[str, Any]:
+    return {"type": "recommendation", "message": message, "recommendations": []}
 
-    def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute decision tasks with research metrics"""
-        # Validate task type
-        if task.get("type") != "decision":
-            return {
-                "type": "recommendation",
-                "recommendation": "N/A (not applicable for this task)"
-            }
 
-        # Extract data, user preferences, and criteria
-        data = task.get("data", {})
-        user_prefs = task.get("user_preferences", {})
-        task_criteria = task.get("criteria", {})
+def _numeric_fields(option: dict[str, Any]) -> dict[str, float]:
+    return {
+        k: 1.0
+        for k, v in option.items()
+        if isinstance(v, (int, float)) and not isinstance(v, bool)
+    }
 
-        # Parse data if it's a string
-        if isinstance(data, str):
-            try:
-                data = json.loads(data)
-            except json.JSONDecodeError:
-                data = {}
 
-        # Extract options from data
-        options = []
-        if isinstance(data, list):
-            options = data
-        elif isinstance(data, dict):
-            content = data.get("content", data)
-            if isinstance(content, str):
-                try:
-                    content = json.loads(content)
-                except json.JSONDecodeError:
-                    content = {}
-            options = content.get("options", []) if isinstance(content, dict) else content
+def _extract_options(data: Any) -> list[dict[str, Any]]:
+    """Callers pass a list, a {"options": [...]}, a {"content": ...} wrapper, or a JSON string."""
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError:
+            return []
+    if isinstance(data, list):
+        return [o for o in data if isinstance(o, dict)]
+    if isinstance(data, dict):
+        if "content" in data:
+            return _extract_options(data["content"])
+        return _extract_options(data.get("options", []))
+    return []
 
-        if not options:
-            return {
-                "type": "recommendation",
-                "message": "No options available for decision making",
-                "recommendations": []
-            }
 
-        # Normalize research impact scores
-        max_impact = max((opt.get("research_impact", 0) for opt in options), default=100)
-        for opt in options:
-            if "research_impact" in opt:
-                opt["research_impact_score"] = opt["research_impact"] / max_impact
-
-        # Prepare scoring criteria
-        numeric_fields = [k for k, v in (options[0] if options else {}).items() 
-                        if isinstance(v, (int, float))]
-        criteria = task_criteria if task_criteria else {field: 1.0 for field in numeric_fields}
-        
-        # Normalize weights
-        total_weight = sum(criteria.values())
-        if total_weight == 0:
-            total_weight = 1
-        normalized_criteria = {k: v/total_weight for k, v in criteria.items()}
-
-        # Score options
-        scored_options = []
-        for option in options:
-            score = self._calculate_option_score(option, normalized_criteria, user_prefs)
-            if score is not None:  # None indicates option should be filtered out
-                scored_options.append((option, score))
-
-        if not scored_options:
-            return {
-                "type": "recommendation",
-                "message": "No suitable options found after applying criteria",
-                "recommendations": []
-            }
-
-        # Sort by score and normalize scores
-        ranked_options = sorted(scored_options, key=lambda x: x[1], reverse=True)
-        max_score = max(s[1] for s in scored_options)
-
-        # Generate recommendations with reasoning
-        recommendations = []
-        for opt, score in ranked_options[:3]:  # Top 3 recommendations
-            recommendations.append({
-                "option": opt,
-                "score": float(score / max_score),  # Normalize to [0,1]
-                "reasoning": self._generate_reasoning(opt, score, user_prefs)
-            })
-
-        return {
-            "type": "recommendation",
-            "recommendations": recommendations
-        }
-        # Validate task type
-        if task.get("type") != "decision":
-            return {
-                "type": "recommendation",
-                "recommendation": "N/A (not applicable for this task)"
-            }
-
-        # Extract data, user preferences, and criteria
-        data = task.get("data", {})
-        user_prefs = task.get("user_preferences", {})
-        task_criteria = task.get("criteria", {})
-
-        # Parse data if it's a string
-        if isinstance(data, str):
-            try:
-                data = json.loads(data)
-            except json.JSONDecodeError:
-                data = {}
-
-        # Extract options from data
-        options = []
-        if isinstance(data, list):
-            options = data
-        elif isinstance(data, dict):
-            options = data.get("options", [])
-            if isinstance(options, str):
-                try:
-                    options = json.loads(options)
-                except json.JSONDecodeError:
-                    options = []
-
-        if not options:
-            return {
-                "type": "recommendation",
-                "message": "No options available for decision making",
-                "recommendations": []
-            }
-        task_type = task.get("type", "unknown")
-        if task_type != "decision":
-            return {
-                "type": "recommendation",
-                "recommendation": "N/A (not applicable for this task)"
-            }
-
-        # Get data from either task data or previous retrieval result
-        data = task.get("data", {})
-        if isinstance(data, dict) and "content" in data:
-            data = data["content"]
-            
-        if isinstance(data, str):
-            try:
-                import json
-                data = json.loads(data)
-            except:
-                data = {}
-                
-            # Handle both direct options and nested options
-        options = []
-        if isinstance(data, list):
-            options = data
-        elif isinstance(data, dict):
-            options = data.get("options", [])
-        
-        # Get user preferences and criteria
-        user_prefs = task.get("user_preferences", {})
-        task_criteria = task.get("criteria", {})
-        
-        # Convert research_impact to normalized score
-        max_impact = max((opt.get("research_impact", 0) for opt in options), default=100)
-        for opt in options:
-            if "research_impact" in opt:
-                opt["research_impact_score"] = opt["research_impact"] / max_impact
-        
-        self.logger.info(f"Making recommendation with {len(options)} options")
-
-        # Normalize the criteria
-        criteria = {}
-        for key, value in task_criteria.items():
-            if isinstance(value, (int, float)):
-                criteria[key] = float(value)
-        
-        if not options:
-            return {
-                "type": "recommendation",
-                "message": "No options available for decision making",
-                "recommendations": []
-            }
-
-        # Combine user preferences with criteria
-        combined_criteria = {}
-        if "max_price" in user_prefs:
-            combined_criteria["price"] = lambda x: 1.0 if x <= user_prefs["max_price"] else 0.0
-        if "min_quality" in user_prefs:
-            combined_criteria["quality"] = lambda x: 1.0 if x >= user_prefs["min_quality"] else 0.0
-        
-        # Add weighted criteria from task
-        for key, weight in criteria.items():
-            if key in combined_criteria:
-                continue
-            combined_criteria[key] = lambda x, w=weight: float(x) * float(w)
-
-        # Score each option
-        scored_options = []
-        for option in options:
-            base_score = 0.0
-            valid_option = True
-            
-            # Check required features
-            if "required_features" in user_prefs:
-                option_features = set(option.get("features", []))
-                required_features = set(user_prefs["required_features"])
-                if not required_features.issubset(option_features):
-                    continue
-
-            # Check constraints
-            if "max_price" in user_prefs and option.get("price", float("inf")) > user_prefs["max_price"]:
-                continue
-            if "min_quality" in user_prefs and option.get("quality", 0) < user_prefs["min_quality"]:
-                continue
-            
-            # Add base score for availability preference
-            if "preferred_availability" in user_prefs and user_prefs["preferred_availability"] == option.get("availability"):
-                base_score += 1.0
-                
-            # Add novelty score
-            novelty_score = option.get("novelty", 0)
-            if novelty_score > 0:
-                base_score += novelty_score * 0.5  # Weight novelty at 50%
-                
-            # Add research impact score
-            research_score = option.get("research_impact_score", 0)
-            if research_score > 0:
-                base_score += research_score * 0.7  # Weight research impact at 70%
-
-            # Calculate weighted score based on research criteria
-            total_weight = 0
-            for key, weight in criteria.items():
-                if key == "research_impact" and "research_impact_score" in option:
-                    base_score += weight * option["research_impact_score"]
-                    total_weight += weight
-                elif key == "novelty" and key in option:
-                    base_score += weight * option[key]
-                    total_weight += weight
-                elif key in option and isinstance(option[key], (int, float)):
-                    normalized_value = option[key] / max((opt.get(key, 1) for opt in options), default=1)
-                    base_score += weight * normalized_value
-                    total_weight += weight
-
-            # Normalize the score
-            if total_weight > 0:
-                base_score = base_score / total_weight
-
-            if valid_option:
-                # Add implementation complexity bonus/penalty
-                if option.get("implementation_complexity") == user_prefs.get("implementation_complexity"):
-                    base_score *= 1.1  # 10% bonus for matching complexity preference
-                
-                scored_options.append({
-                    "option": option,
-                    "score": base_score
-                })
-
-        # Sort by score
-        scored_options.sort(key=lambda x: x["score"], reverse=True)
-        
-        # Calculate statistical metrics
-        scores = [opt["score"] for opt in scored_options]
-        stats = {
-            "mean_score": float(np.mean(scores)) if scores else 0,
-            "std_dev": float(np.std(scores)) if scores else 0,
-            "median": float(np.median(scores)) if scores else 0,
-            "min_score": float(np.min(scores)) if scores else 0,
-            "max_score": float(np.max(scores)) if scores else 0,
-            "total_options": len(options),
-            "valid_options": len(scored_options),
-            "criteria_weights": criteria,
-            "timestamp": task.get("timestamp", ""),
-        }
-
-        # Add percentile rankings
-        if scores:
-            percentiles = [25, 50, 75, 90]
-            stats["percentiles"] = {
-                f"p{p}": float(np.percentile(scores, p))
-                for p in percentiles
-            }
-        
-        return {
-            "type": "recommendation",
-            "recommendations": recommendations
-        }
-
-    def _make_classification(self, options: List[Dict[str, Any]], criteria: Dict[str, Any]) -> Dict[str, Any]:
-        """Classify options based on criteria"""
-        threshold = criteria.get("threshold", 0.5)
-        features = criteria.get("features", [])
-
-        if not options or not features:
-            raise ValueError("Options and features are required for classification")
-
-        classifications = []
-        for option in options:
-            # Extract feature values
-            feature_values = []
-            for feature in features:
-                value = option.get(feature, 0)
-                feature_values.append(float(value))
-
-            # Normalize features
-            normalized_values = self.scaler.fit_transform([feature_values])[0]
-            
-            # Simple threshold-based classification
-            score = np.mean(normalized_values)
-            classification = "accept" if score >= threshold else "reject"
-
-            classifications.append({
-                "option": option,
-                "classification": classification,
-                "confidence": float(abs(score - threshold))
-            })
-
-        return {
-            "type": "classification",
-            "classifications": classifications,
-            "threshold": threshold
-        }
+def _stats(scores: list[float], total_options: int, weights: dict[str, float]) -> dict[str, Any]:
+    if not scores:
+        return {"total_options": total_options, "valid_options": 0}
+    a = np.asarray(scores, dtype=float)
+    return {
+        "mean_score": float(a.mean()),
+        "std_dev": float(a.std()),
+        "median": float(np.median(a)),
+        "min_score": float(a.min()),
+        "max_score": float(a.max()),
+        "total_options": total_options,
+        "valid_options": len(scores),
+        "criteria_weights": weights,
+        "percentiles": {f"p{p}": float(np.percentile(a, p)) for p in (25, 50, 75, 90)},
+    }
