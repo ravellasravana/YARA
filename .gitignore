@@ -11,3 +11,6 @@ venv/
 htmlcov/
 dist/
 build/
+
+commit.ps1
+MESSAGE.txt
