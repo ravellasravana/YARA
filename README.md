@@ -16,12 +16,20 @@ what exists today, not what is planned.
   mid-claim can't support the claim it half contains.
 - **Hashing embedder** — feature hashing over unigrams and bigrams. No model
   download, no network, no API key.
+- **Vector store** — exact cosine search over a float32 matrix, persisted to
+  disk. Reloading with a different embedder discards the index rather than
+  comparing vectors that aren't comparable.
+- **Hybrid retrieval** — BM25, written out rather than pulled in, fused with
+  dense search using reciprocal rank fusion.
+- **Ingestion** — single files or whole directories. Text, markdown, HTML,
+  and PDF.
+- **Agent memory** — SQLite in three tiers: run history, per-run scratchpad,
+  and semantic recall across runs.
 
 ## Next
 
-Vector store with persistence · BM25 and reciprocal rank fusion · corpus
-ingestion · SQLite agent memory · LLM provider layer · tool calling · planner,
-analyst, synthesiser and critic agents · orchestration · FastAPI service ·
+LLM provider layer · tool calling · planner, analyst, synthesiser and critic
+agents · orchestration with citation verification · CLI · FastAPI service ·
 Docker.
 
 ## Running
@@ -31,11 +39,19 @@ pip install -e ".[dev]"
 pytest
 ```
 
-13 tests. No API key required.
+55 tests. No API key required.
 
-## Notes
+## Two things worth knowing
 
-The embedder uses **unsigned** feature hashing. Signed hashing is the standard
+**Dense search alone isn't enough.** Embeddings generalise across paraphrase
+but go blind on rare literal tokens — identifiers, acronyms, version numbers.
+BM25 is the other way round. Reciprocal rank fusion combines the two ranked
+lists on *rank* rather than score, so the two scales never need calibrating
+against each other, which is why it moves to a new corpus without retuning.
+`test_surfaces_lexical_only_match` is the test that justifies the whole
+arrangement.
+
+**The embedder uses unsigned feature hashing.** Signed hashing is the standard
 trick and keeps inner products unbiased in expectation, but colliding terms
 with opposite signs cancel — a passage containing both query terms scored
 exactly `0.0`. Unsigned turns collisions into additive noise instead, which
