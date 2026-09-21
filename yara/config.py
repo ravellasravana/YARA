@@ -18,8 +18,13 @@ EmbedderName = Literal["hashing", "sentence-transformers", "openai"]
 
 
 class Settings(BaseSettings):
+    # populate_by_name: the API-key fields carry aliases so they read the
+    # conventional un-prefixed env vars (ANTHROPIC_API_KEY, not
+    # YARA_ANTHROPIC_API_KEY). Without this flag an alias *replaces* the
+    # field name as a constructor argument, so Settings(anthropic_api_key=...)
+    # was silently dropped by extra="ignore" and the provider fell back to echo.
     model_config = SettingsConfigDict(
-        env_prefix="YARA_", env_file=".env", extra="ignore"
+        env_prefix="YARA_", env_file=".env", extra="ignore", populate_by_name=True
     )
 
     # --- LLM ---
