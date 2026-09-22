@@ -30,7 +30,13 @@ dependencies = [
 pdf = ["pypdf>=4.0.0"]
 neural = ["sentence-transformers>=2.3.0"]
 faiss = ["faiss-cpu>=1.7.4"]
-dev = ["pytest>=7.4.0", "pytest-cov>=4.1.0", "ruff>=0.3.0"]
+api = ["fastapi>=0.110.0", "uvicorn[standard]>=0.27.0"]
+# dev pulls in api so the API tests run instead of skipping on a plain
+# `pip install -e ".[dev]"`.
+dev = ["pytest>=7.4.0", "pytest-cov>=4.1.0", "ruff>=0.3.0", "yara-research[api]"]
+
+[project.scripts]
+yara = "yara.cli:main"
 
 [project.urls]
 Repository = "https://github.com/ravellasravana/YARA"
@@ -55,4 +61,4 @@ ignore = ["E501"]
 
 [tool.coverage.run]
 source = ["yara"]
-omit = ["yara/cli.py", "*/__init__.py"]
+omit = ["*/__init__.py"]

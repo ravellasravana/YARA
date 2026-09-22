@@ -111,9 +111,18 @@ class DecisionAgent:
                 score += 1.0
 
         for field, w in weights.items():
-            score += normalised.get(field, 0.0) * w
+            n = normalised.get(field)
+            if n is None:
+                continue
+            # A cost scores by how far it sits below the largest cost seen,
+            # |w| * (1 - n), rather than w * n. Same ranking (a constant
+            # shift), but scores stay non-negative, which the two steps below
+            # rely on: multiplying a negative score by the complexity bonus
+            # would *penalise* the preferred option, and dividing by a
+            # negative best score made every other option score above 1.0.
+            score += abs(w) * (1.0 - n) if w < 0 else w * n
 
-        if option.get("implementation_complexity") == prefs.get("implementation_complexity"):
+        if _matches_complexity(option, prefs):
             score *= bonus
         return score
 
@@ -125,12 +134,20 @@ class DecisionAgent:
             reasons.append("High novelty factor")
         if normalised.get("research_impact", 0) > 0.7:
             reasons.append("Strong research impact potential")
-        if option.get("implementation_complexity") == prefs.get("implementation_complexity"):
+        if _matches_complexity(option, prefs):
             reasons.append("Matches preferred implementation complexity")
         matched = set(option.get("features", [])) & set(prefs.get("required_features", []))
         if matched:
             reasons.append(f"Contains required features: {', '.join(sorted(matched))}")
         return " | ".join(reasons) or "Based on overall score analysis"
+
+
+def _matches_complexity(option: dict[str, Any], prefs: dict[str, Any]) -> bool:
+    # Both sides missing compared equal (None == None), so every option in a
+    # task with no complexity preference got the bonus and the "matches
+    # preferred complexity" reason. Surfaced by `yara decide` on price data.
+    wanted = prefs.get("implementation_complexity")
+    return wanted is not None and option.get("implementation_complexity") == wanted
 
 
 def _empty(message: str) -> dict[str, Any]:

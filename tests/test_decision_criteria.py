@@ -111,3 +111,49 @@ def test_unknown_criterion_is_logged(caplog):
     with caplog.at_level("WARNING", logger="yara.agents.decision"):
         _rank({"criteria": {"novelty": 1, "does_not_exist": 1}})
     assert "does_not_exist" in caplog.text
+
+
+def test_no_complexity_bonus_without_a_preference():
+    """None == None used to award the bonus to every option lacking the field."""
+    data = [
+        {"name": "tagged", "quality": 0.9, "implementation_complexity": "low"},
+        {"name": "untagged", "quality": 0.85},
+    ]
+    result = DecisionAgent().execute(
+        {"type": "decision", "data": data, "criteria": {"quality": 1.0}, "complexity_bonus": 2.0}
+    )
+    names = [r["option"]["name"] for r in result["recommendations"]]
+    assert names == ["tagged", "untagged"]
+    assert all(
+        "complexity" not in r["reasoning"] for r in result["recommendations"]
+    )
+
+
+def test_cost_only_scores_stay_in_unit_range():
+    """Relative scores divide by the best; a negative best put the rest above 1.0."""
+    names, result = _rank({"criteria": {"price": -1.0}})
+    scores = [r["score"] for r in result["recommendations"]]
+    assert names[0] == "C"
+    assert scores[0] == pytest.approx(1.0)
+    assert all(0.0 <= s <= 1.0 for s in scores)
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_complexity_bonus_helps_under_cost_criteria():
+    """Multiplying a negative score by the bonus used to *penalise* the match."""
+    data = [
+        {"name": "fit", "price": 100, "implementation_complexity": "low"},
+        {"name": "other", "price": 95, "implementation_complexity": "high"},
+        {"name": "anchor", "price": 200},
+    ]
+    result = DecisionAgent().execute(
+        {
+            "type": "decision",
+            "data": data,
+            "criteria": {"price": -1.0},
+            "complexity_bonus": 3.0,
+            "user_preferences": {"implementation_complexity": "low"},
+        }
+    )
+    # Before the fix: fit -1.5 vs other -0.475, so the preferred option lost.
+    assert result["recommendations"][0]["option"]["name"] == "fit"
