@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A second push to the same branch cancels the first run. Without this, a
+# branch pushed three times in a minute queues three full matrices.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only by default. Nothing here publishes, comments, or tags, so the
+# token has no reason to be able to write to the repository.
+permissions:
+  contents: read
+
+env:
+  # No secrets are referenced anywhere in this file, by design: the echo
+  # provider makes every agent path deterministic and offline, so CI proves
+  # the system works without a paid API call. Stating it here also stops a
+  # developer's exported key from changing what a run exercises.
+  YARA_PROVIDER: echo
+
+jobs:
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      # Just the linter: ruff has no opinion about whether the package
+      # imports, so installing the project here would only cost a minute.
+      - run: pip install "ruff>=0.3.0"
+      - run: ruff check --output-format=github yara tests
+
+  test:
+    name: pytest (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      # One version failing should not hide the result on the other two -
+      # that difference is usually the whole diagnosis.
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      # The dev extra pulls in the api extra, so the FastAPI tests run
+      # rather than skipping past importorskip on every matrix leg.
+      - run: pip install -e ".[dev]"
+      - run: pytest --cov=yara --cov-report=term-missing --cov-report=xml
+      - name: Upload coverage
+        # One artifact, from the version the project develops against.
+        # Three identical XMLs would only differ by upload timestamp.
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          retention-days: 14
+
+  docker:
+    name: image
+    runs-on: ubuntu-latest
+    # Only after the code is known good: a green image built from red code
+    # is a slower way to learn the same thing.
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t yara:ci .
+
+      # A build that succeeds proves the layers resolve, not that the
+      # service starts. These three checks are the claims the Dockerfile
+      # makes: it serves, it answers, and it is not root.
+      - name: Start the container
+        run: docker run -d --name yara-ci -p 8000:8000 yara:ci
+
+      - name: Wait for /health
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health; then
+              echo && exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::/health never answered"
+          docker logs yara-ci
+          exit 1
+
+      - name: Container must not run as root
+        run: |
+          uid=$(docker exec yara-ci id -u)
+          echo "container uid: $uid"
+          test "$uid" -ne 0
+
+      - name: Stop the container
+        if: always()
+        run: docker rm -f yara-ci

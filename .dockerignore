@@ -1,0 +1,31 @@
+# Everything the build doesn't need. This is not only about image size: the
+# build context is uploaded to the daemon on every build, and a local .yara/
+# index or a .env with real keys has no business leaving the working tree.
+.git/
+.github/
+.gitignore
+
+.env
+.yara/
+*.sqlite3
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+
+tests/
+examples/
+Makefile
+docker-compose.yml
+Dockerfile
+requirements.txt

@@ -1,0 +1,60 @@
+# No `version:` key - Compose v2 ignores it and warns about it.
+#
+#   docker compose up --build            # serve the API on :8000
+#   docker compose run --rm ingest       # load examples/corpus into the volume
+#
+# The two services share one named volume. That is the point of the layout:
+# the corpus and the run history outlive any container, and a one-off CLI
+# invocation writes to the same index the server reads.
+
+services:
+  api:
+    build:
+      context: .
+      args:
+        PYTHON_VERSION: "3.12"
+    image: yara:local
+    ports:
+      - "${YARA_PORT:-8000}:8000"
+    environment:
+      # Read from the host shell or a local .env, with an offline-safe
+      # default so `docker compose up` works with no secrets configured.
+      YARA_PROVIDER: ${YARA_PROVIDER:-echo}
+      YARA_MODEL: ${YARA_MODEL:-claude-sonnet-4-5}
+      # Passed through un-prefixed because that is what Settings' aliases
+      # read; empty means "not set" and the provider falls back to echo.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    volumes:
+      - yara-data:/data
+    restart: unless-stopped
+
+  # A one-shot CLI container, not a second server. `profiles` keeps it out of
+  # `docker compose up`, so it only runs when asked for by name.
+  #
+  # No `depends_on: api`. The server loads the vector index into memory at
+  # startup and re-saves it on its own ingests, so a second writer against
+  # the same volume would be overwritten. Ingest first, then start the API -
+  # or restart it afterwards with `docker compose restart api`. Two processes
+  # sharing a file-backed index is exactly the limit a real vector database
+  # removes.
+  ingest:
+    profiles: ["cli"]
+    # Same tag and context as `api`, so this builds the image once and the
+    # second service is a cache hit rather than a pull of something that was
+    # never pushed anywhere.
+    build:
+      context: .
+    image: yara:local
+    environment:
+      YARA_PROVIDER: ${YARA_PROVIDER:-echo}
+    volumes:
+      - yara-data:/data
+      # Read-only: ingestion reads the corpus and writes only to /data.
+      - ./examples/corpus:/corpus:ro
+    entrypoint: ["yara"]
+    command: ["ingest", "/corpus"]
+
+volumes:
+  yara-data:
