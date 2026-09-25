@@ -15,3 +15,5 @@ build/
 
 commit.ps1
 MESSAGE.txt
+
+*.patch
